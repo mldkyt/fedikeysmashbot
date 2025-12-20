@@ -242,6 +242,19 @@ def quote(instance: str, token: str, post_id: str, text: str):
     return req.ok
 
 
+def reply(instance: str, token: str, post_id: str, text: str):
+    req = post(
+        f"https://{instance}/api/notes/create",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "replyId": post_id,
+            "text": text,
+        },
+    )
+
+    return req.ok
+
+
 def notifications(instance: str, token: str):
     req = post(
         f"https://{instance}/api/i/notifications",
@@ -253,5 +266,20 @@ def notifications(instance: str, token: str):
 
     if not req.ok:
         return []
+
+    return req.json()
+
+
+def get_user(instance: str, token: str, user_id: str):
+    req = post(
+        f"https://{instance}/api/users/show",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        json={"userId": user_id},
+    )
+
+    if not req.ok:
+        return {}
 
     return req.json()
