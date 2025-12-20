@@ -346,7 +346,7 @@ async def get_posts_to_quote(instance: str, token: str, user):
                             "id": j["id"],
                             "text": f"""Password found: `{k}` :3
 
-                            @{get_effective_name(user)} {choice(affirming_text)} :3""",
+@{get_effective_name(user)} {choice(affirming_text)} :3""",
                         }
                     )
                     break
@@ -434,7 +434,7 @@ async def reply_to_keysmash_detections(instance: str, token: str, me, debug=Fals
                         keysmashbot_logger.debug("Reply to %s", i["note"]["id"])
                         keysmashbot_logger.debug(f"""Password found: `{j}` :3
 
-                        @{get_effective_name(i["user"])} {choice(affirming_text)} :3""")
+@{get_effective_name(i["user"])} {choice(affirming_text)} :3""")
                     else:
                         reply(
                             instance,
@@ -442,7 +442,7 @@ async def reply_to_keysmash_detections(instance: str, token: str, me, debug=Fals
                             i["note"]["id"],
                             f"""Password found: `{j}` :3
 
-                            @{get_effective_name(i["user"])} {choice(affirming_text)} :3""",
+@{get_effective_name(i["user"])} {choice(affirming_text)} :3""",
                         )
 
                     break
