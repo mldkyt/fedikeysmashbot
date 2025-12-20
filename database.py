@@ -3,7 +3,6 @@ import os
 
 import dotenv
 from sqlalchemy import (
-    BOOLEAN,
     VARCHAR,
     Column,
     DateTime,
@@ -34,6 +33,10 @@ quoted_posts_table = Table(
     "quoted_posts",
     md_obj,
     Column("id", VARCHAR, primary_key=True),
+)
+
+responded_dms_table = Table(
+    "responded_dms", md_obj, Column("id", VARCHAR, primary_key=True)
 )
 
 follows_table = Table(
