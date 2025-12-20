@@ -322,7 +322,7 @@ def main():
                                 insert(quoted_posts_table).values(id=str(j["id"]))
                             )
 
-                            sleep(30 * 60 * 60)  # sleep for 30 minutes (don't spam)
+                            sleep(30 * 60)  # sleep for 30 minutes (don't spam)
 
                             break
 
