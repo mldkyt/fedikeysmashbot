@@ -484,10 +484,10 @@ async def main():
     keysmashbot_logger.info("Starting keysmashbot 2.0")
     while True:
         keysmashbot_logger.debug("Getting followers and following back...")
-        # followers = await check_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id)
-        followers = []
-        for i in get_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id):
-            followers.append(i)
+        followers = await check_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id)
+        # followers = []
+        # for i in get_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id):
+        #     followers.append(i)
 
         keysmashbot_logger.debug("%s followers", str(len(followers)))
 
