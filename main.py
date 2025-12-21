@@ -2,11 +2,11 @@ import asyncio
 import datetime
 import re
 from os import getenv
-from random import choice, random, shuffle
+from random import choice, shuffle
 
 from dotenv import load_dotenv
-from password_strength import PasswordStats
 from sqlalchemy import delete, insert, select, update
+from zxcvbn import zxcvbn
 
 from database import (
     engine,
@@ -23,7 +23,6 @@ from misskey import (
     get_followers,
     get_notes,
     get_relationships,
-    get_user,
     me,
     me_detailed,
     notifications,
@@ -323,10 +322,15 @@ async def get_posts_to_quote(instance: str, token: str, user):
                         continue
                     if "$INSTANCE$" in k:  # fedicrimes
                         continue
-                    password = PasswordStats(k)
+                    password = zxcvbn(k)
 
                     try:
-                        if password.strength() < 0.8:
+                        if (
+                            password["crack_times_seconds"][
+                                "offline_fast_hashing_1e10_per_second"
+                            ]
+                            > 600
+                        ):
                             continue
                     except Exception:
                         keysmashbot_logger.exception("Error measuring password length")
@@ -339,14 +343,17 @@ async def get_posts_to_quote(instance: str, token: str, user):
                         "is a good entity",
                         "is a pretty entity",
                         "is a good password generator",
+                        "is such a good entity",
+                        "is such a pretty entity",
+                        "is such a good password generator",
                     ]
 
                     posts.append(
                         {
                             "id": j["id"],
-                            "text": f"""Password found: `{k}` :3
+                            "text": f"""Password found: `{k}`
 
-@{get_effective_name(user)} {choice(affirming_text)} :3""",
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(user)} {choice(affirming_text)} :3""",
                         }
                     )
                     break
@@ -410,10 +417,15 @@ async def reply_to_keysmash_detections(instance: str, token: str, me, debug=Fals
                         continue
                     if "$INSTANCE$" in j:  # fedicrimes
                         continue
-                    password = PasswordStats(j)
+                    password = zxcvbn(j)
 
                     try:
-                        if password.strength() < 0.7:
+                        if (
+                            password["crack_times_seconds"][
+                                "offline_fast_hashing_1e10_per_second"
+                            ]
+                            > 600
+                        ):
                             continue
                     except Exception:
                         keysmashbot_logger.exception("Error measuring password length")
@@ -428,21 +440,24 @@ async def reply_to_keysmash_detections(instance: str, token: str, me, debug=Fals
                         "is a good entity",
                         "is a pretty entity",
                         "is a good password generator",
+                        "is such a good entity",
+                        "is such a pretty entity",
+                        "is such a good password generator",
                     ]
 
                     if debug:
                         keysmashbot_logger.debug("Reply to %s", i["note"]["id"])
-                        keysmashbot_logger.debug(f"""Password found: `{j}` :3
+                        keysmashbot_logger.debug(f"""Password found: `{j}`
 
-@{get_effective_name(i["user"])} {choice(affirming_text)} :3""")
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(i["user"])} {choice(affirming_text)} :3""")
                     else:
                         reply(
                             instance,
                             token,
                             i["note"]["id"],
-                            f"""Password found: `{j}` :3
+                            f"""Password found: `{j}`
 
-@{get_effective_name(i["user"])} {choice(affirming_text)} :3""",
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(i["user"])} {choice(affirming_text)} :3""",
                         )
 
                     break
