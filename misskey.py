@@ -80,9 +80,8 @@ def get_notes(instance: str, token: str, user_id: str):
             "limit": 100,
             "userId": user_id,
             "withRenotes": False,
-            "withQuotes": False,
-            "withReplies": False,
-            "withRepliesToSelf": False,
+            "withQuotes": True,
+            "withReplies": True,
         },
         headers={"Authorization": f"Bearer {token}"},
     )
