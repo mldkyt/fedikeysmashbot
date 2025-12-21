@@ -335,18 +335,14 @@ async def get_posts_to_quote(instance: str, token: str, user):
                         continue
                     if "$INSTANCE$" in k:  # fedicrimes
                         continue
-                    password = zxcvbn(k)
+                    password = zxcvbn(k[:71])
 
-                    try:
-                        if (
-                            password["crack_times_seconds"][
-                                "offline_fast_hashing_1e10_per_second"
-                            ]
-                            > 600
-                        ):
-                            continue
-                    except Exception:
-                        keysmashbot_logger.exception("Error measuring password length")
+                    if (
+                        password["crack_times_seconds"][
+                            "offline_fast_hashing_1e10_per_second"
+                        ]
+                        < 43200
+                    ):
                         continue
 
                     keysmashbot_logger.debug("Post %s is gonna get quoted", j["id"])
@@ -430,14 +426,14 @@ async def reply_to_keysmash_detections(instance: str, token: str, me, debug=Fals
                         continue
                     if "$INSTANCE$" in j:  # fedicrimes
                         continue
-                    password = zxcvbn(j)
+                    password = zxcvbn(j[:71])
 
                     try:
                         if (
                             password["crack_times_seconds"][
                                 "offline_fast_hashing_1e10_per_second"
                             ]
-                            > 600
+                            < 43200
                         ):
                             continue
                     except Exception:
