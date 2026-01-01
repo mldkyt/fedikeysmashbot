@@ -51,4 +51,12 @@ last_scan_table = Table(
     Column("last_scan", DateTime, nullable=False),
 )
 
+user_prefs_table = Table(
+    "user_prefs",
+    md_obj,
+    Column("user", VARCHAR, primary_key=True),
+    Column("key", VARCHAR, primary_key=True),
+    Column("value", VARCHAR, nullable=False),
+)
+
 md_obj.create_all(engine, checkfirst=True)

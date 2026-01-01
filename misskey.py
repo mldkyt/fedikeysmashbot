@@ -131,7 +131,7 @@ class Misskey:
 
         return req.ok
 
-    def post(self, text: str, reply_id: str | None = None, quote_id: str | None = None,
+    def post(self, text: str, cw: str | None = None, reply_id: str | None = None, quote_id: str | None = None,
             direct_id: str | None = None, ) -> bool:
         if not self.logged_in:
             print("[Misskey] API Call without logged in")
@@ -148,6 +148,9 @@ class Misskey:
 
         if quote_id is not None:
             body["renoteId"] = quote_id
+
+        if cw is not None:
+            body["cw"] = cw
 
         req = post(f"https://{self.instance}/api/notes/create", headers={"Authorization": f"Bearer {self.token}"},
             json=body, )
