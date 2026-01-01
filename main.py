@@ -2,34 +2,15 @@ import asyncio
 import datetime
 import re
 from os import getenv
-from random import choice, shuffle
+from random import choice
 
 from dotenv import load_dotenv
 from sqlalchemy import delete, insert, select, update
 from zxcvbn import zxcvbn
 
-from database import (
-    engine,
-    follows_table,
-    last_scan_table,
-    posts_table,
-    quoted_posts_table,
-    responded_dms_table,
-)
+from database import (engine, follows_table, last_scan_table, posts_table, quoted_posts_table, responded_dms_table, )
 from logger import get_logger
-from misskey import (
-    follow,
-    get_effective_name,
-    get_followers,
-    get_notes,
-    get_relationships,
-    me,
-    me_detailed,
-    notifications,
-    quote,
-    reply,
-    unfollow,
-)
+from misskey import Misskey
 
 keysmashbot_logger = get_logger("keysmashbot")
 
@@ -164,7 +145,7 @@ def sanitize_password(password: str) -> str:
     password = re.sub(r"@[a-zA-Z.\-_]+", "", password)
     password = re.sub(r"#\w+", "", password)
     password = re.sub(r":[a-zA-Z_\-0-9]+?:", "", password)
-    password = re.sub(r"\[.+?\]\(.+?\)", "", password)
+    password = re.sub(r"\[.+?]\(.+?\)", "", password)
     for i in range(10):
         password = re.sub(r"<i>(.+?)</i>", r"\1", password)
     for i in range(3):
@@ -175,310 +156,233 @@ def sanitize_password(password: str) -> str:
         password = re.sub(r"<small>(.+?)</small>", r"\1", password)
     password = sanitize_formatting(password)
     for i in range(10):
-        password = re.sub(r"$\[(.+)\]", r"\1", password)
+        password = re.sub(r"\$\[.+?\s(.+)]", r"\1", password)
     password = re.sub(
-        r"hr?ttps?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)",
-        "",
-        password,
-    )
+        r"hr?ttps?://(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)", "",
+        password, )
 
     return password
 
 
-async def check_followers(instance: str, token: str, me_id: str) -> list:
-    followers = []
+posts_to_handle = []
+misskey = Misskey()
 
-    for i in get_followers(instance, token, me_id):
-        followers.append(i)
+
+async def check_followers() -> list:
+    global misskey
+
+    while True:
+        keysmashbot_logger.debug("Handling follows")
+
+        for i in misskey.get_followers():
+            try:
+                if not i["isFollowing"] and not i["hasPendingFollowRequestFromYou"] and not i["isBlocking"]:
+                    while True:
+                        follow = misskey.follow(i["id"])
+                        if follow:
+                            with engine.begin() as c:
+                                c.execute(insert(follows_table).values(id=i["id"], acct=misskey.get_effective_name(i)))
+                            keysmashbot_logger.info("Followed %s successfully", misskey.get_effective_name(i))
+                            break
+                        await asyncio.sleep(4)
+            except Exception:
+                print("fail to follow", i["name"])
+                keysmashbot_logger.exception("fail to follow %s", i["name"])
+                break
+
         with engine.begin() as c:
-            rel = get_relationships(instance, token, i["id"])
-            await asyncio.sleep(1)
-            if not rel:
-                continue
-
-            if (
-                not rel["isFollowing"]
-                and not rel["hasPendingFollowRequestFromYou"]
-                and not rel["isBlocking"]
-            ):
-                while True:
-                    try:
-                        follow(instance, token, i["id"])
-                        await asyncio.sleep(1)
-                        c.execute(
-                            insert(follows_table).values(
-                                id=i["id"], acct=get_effective_name(i)
-                            )
-                        )
-                        keysmashbot_logger.info(
-                            "Followed %s successfully", get_effective_name(i)
-                        )
-                        break
-                    except Exception:
-                        print("fail to follow", i["name"])
-                        keysmashbot_logger.exception("fail to follow %s", i["name"])
-                        break
-
-    with engine.begin() as c:
-        a = c.execute(select(follows_table.c.id, follows_table.c.acct)).all()
+            a = c.execute(select(follows_table.c.id, follows_table.c.acct)).all()
 
         for i in a:
-            rel = get_relationships(instance, token, i[0])
-            await asyncio.sleep(1)
-
+            rel = misskey.get_user(i[0])
             if not rel:
                 continue
 
-            if not rel["isFollowed"]:
+            if not rel["isFollowed"] and rel["isFollowing"]:
                 try:
-                    if rel["isFollowing"]:
-                        unfollow(instance, token, i[0])
-                        await asyncio.sleep(1)
+                    unfollow_ok = misskey.unfollow(i[0])
+                    if unfollow_ok:
                         keysmashbot_logger.info("unfollowed %s", i[0])
 
-                    with engine.begin() as c:
-                        c.execute(
-                            delete(posts_table).where((posts_table.c.author == i[1]))
-                        )
-                        c.execute(
-                            delete(follows_table).where((follows_table.c.id == i[0]))
-                        )
+                        with engine.begin() as c:
+                            c.execute(delete(posts_table).where((posts_table.c.author == i[1])))
+                            c.execute(delete(follows_table).where((follows_table.c.id == i[0])))
 
-                        keysmashbot_logger.info("Deleted all posts of %s", i[0])
+                            keysmashbot_logger.info("Deleted all posts of %s", i[0])
 
+                    await asyncio.sleep(1)
                 except Exception as e:
                     print(f"failed to unfollow {i[0]}: {str(e)}")
                     keysmashbot_logger.exception("failed to unfollow %s", i[0])
                     pass
 
-    return followers
+        await asyncio.sleep(180)
 
 
-async def get_posts_to_quote(instance: str, token: str, user):
-    posts = []
-    with engine.begin() as c:
-        try:
-            a = c.execute(
-                select(last_scan_table.c.last_scan).where(
-                    (last_scan_table.c.id == user["id"])
-                )
-            ).fetchone()
-            if a is None:
-                c.execute(
-                    insert(last_scan_table).values(
-                        id=user["id"], last_scan=datetime.datetime.now()
-                    )
-                )
+async def get_posts_to_quote():
+    global posts_to_handle, misskey
 
-                do_full_scan = False
-            else:
-                if (datetime.datetime.now() - a[0]).total_seconds() > 1209600:
-                    do_full_scan = True
-                    c.execute(
-                        update(last_scan_table)
-                        .where((last_scan_table.c.id == user["id"]))
-                        .values(last_scan=datetime.datetime.now())
-                    )
+    while True:
+        with engine.begin() as c:
+            for user in misskey.get_followers():
+                try:
+                    a = c.execute(
+                        select(last_scan_table.c.last_scan).where((last_scan_table.c.id == user["id"]))).fetchone()
+                    if a is None:
+                        c.execute(insert(last_scan_table).values(id=user["id"], last_scan=datetime.datetime.now()))
 
-                    keysmashbot_logger.info(
-                        "Full-scan performing on %s", get_effective_name(user)
-                    )
-                else:
-                    do_full_scan = False
-
-            for j in get_notes(instance, token, user["id"]):
-                a = c.execute(
-                    select(posts_table.c.id).where((posts_table.c.id == str(j["id"])))
-                ).fetchone()
-                if a is not None:
-                    if do_full_scan:
-                        continue
+                        do_full_scan = False
                     else:
-                        keysmashbot_logger.debug(
-                            "Got to end of notes for %s, skipping",
-                            get_effective_name(user),
-                        )
-                        break
+                        if (datetime.datetime.now() - a[0]).total_seconds() > 1209600:
+                            do_full_scan = True
+                            c.execute(update(last_scan_table).where((last_scan_table.c.id == user["id"])).values(
+                                last_scan=datetime.datetime.now()))
 
-                if j["visibility"] != "home" and j["visibility"] != "public":
-                    c.execute(
-                        insert(posts_table).values(
-                            id=str(j["id"]),
-                            author=get_effective_name(j["user"]),
-                        )
-                    )
-                    keysmashbot_logger.debug(
-                        "Not handling post %s: It is private or followers only",
-                        j["id"],
-                    )
-                    continue
+                            keysmashbot_logger.info("Full-scan performing on %s", misskey.get_effective_name(user))
+                        else:
+                            do_full_scan = False
 
-                b = c.execute(
-                    select(quoted_posts_table.c.id).where(
-                        (quoted_posts_table.c.id == str(j["id"]))
-                    )
-                ).fetchone()
-                if b is not None:
-                    keysmashbot_logger.debug(
-                        "Post %s is already quoted, skipping", j["id"]
-                    )
-                    continue
+                    for j in misskey.get_notes(user["id"]):
+                        a = c.execute(select(posts_table.c.id).where((posts_table.c.id == str(j["id"])))).fetchone()
+                        if a is not None:
+                            if do_full_scan:
+                                continue
+                            else:
+                                keysmashbot_logger.debug("Got to end of notes for %s, skipping",
+                                    misskey.get_effective_name(user), )
+                                break
 
-                text = j["text"]
-
-                text = sanitize_password(text)
-
-                for k in re.split(r",|\.|\s|;|:|_|\-|\/", text):
-                    if len(k.strip()) == 0:
-                        continue
-                    if "\n" in k:
-                        continue
-                    if "$INSTANCE$" in k:  # fedicrimes
-                        continue
-                    password = zxcvbn(k[:71])
-
-                    if (
-                        password["crack_times_seconds"][
-                            "offline_fast_hashing_1e10_per_second"
-                        ]
-                        < 43200
-                    ):
-                        continue
-
-                    keysmashbot_logger.debug("Post %s is gonna get quoted", j["id"])
-
-                    affirming_text = [
-                        "is cute",
-                        "is a good entity",
-                        "is a pretty entity",
-                        "is a good password generator",
-                        "is such a good entity",
-                        "is such a pretty entity",
-                        "is such a good password generator",
-                    ]
-
-                    posts.append(
-                        {
-                            "id": j["id"],
-                            "text": f"""Password found: `{k}`
-
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(user)} {choice(affirming_text)} :3""",
-                        }
-                    )
-                    break
-                c.execute(
-                    insert(posts_table).values(
-                        id=str(j["id"]),
-                        author=get_effective_name(j["user"]),
-                    )
-                )
-        except Exception:
-            keysmashbot_logger.exception(
-                "Failed to query posts for %s", get_effective_name(user)
-            )
-
-    keysmashbot_logger.debug("Returning %s posts", str(len(posts)))
-    return posts
-
-
-async def reply_to_keysmash_detections(instance: str, token: str, me, debug=False):
-    notifs = notifications(instance, token)
-
-    keysmashbot_logger.debug("Notification count: %s", str(len(notifs)))
-
-    with engine.begin() as c:
-        for i in notifs:
-            try:
-                if (
-                    i["note"]["visibility"] != "home"
-                    and i["note"]["visibility"] != "public"
-                ):
-                    keysmashbot_logger.debug(
-                        "Not reply to post %s: It is private or followers only",
-                        i["note"]["id"],
-                    )
-                    continue
-
-                is_replied = (
-                    c.execute(
-                        select(responded_dms_table).where(
-                            (responded_dms_table.c.id == str(i["id"]))
-                        )
-                    ).fetchone()
-                    is not None
-                )
-
-                if is_replied:
-                    keysmashbot_logger.debug(
-                        "Not replying to post %s: It is already replied to",
-                        i["note"]["id"],
-                    )
-                    continue
-
-                text = i["note"]["text"]
-
-                text = sanitize_password(text)
-
-                for j in re.split(r",|\.|\s|;|:|_|\-|\/", text):
-                    if len(j.strip()) == 0:
-                        continue
-                    if "\n" in j:
-                        continue
-                    if "$INSTANCE$" in j:  # fedicrimes
-                        continue
-                    password = zxcvbn(j[:71])
-
-                    try:
-                        if (
-                            password["crack_times_seconds"][
-                                "offline_fast_hashing_1e10_per_second"
-                            ]
-                            < 43200
-                        ):
+                        if j["visibility"] != "home" and j["visibility"] != "public":
+                            c.execute(insert(posts_table).values(id=str(j["id"]),
+                                author=misskey.get_effective_name(j["user"]), ))
+                            keysmashbot_logger.debug("Not handling post %s: It is private or followers only", j["id"], )
                             continue
-                    except Exception:
-                        keysmashbot_logger.exception("Error measuring password length")
+
+                        b = c.execute(
+                            select(quoted_posts_table.c.id).where((quoted_posts_table.c.id == str(j["id"])))).fetchone()
+                        if b is not None:
+                            keysmashbot_logger.debug("Post %s is already quoted, skipping", j["id"])
+                            continue
+
+                        text = j["text"]
+
+                        text = sanitize_password(text)
+
+                        for k in re.split(r",|\.|\s|;|:|_|-|/", text):
+                            if len(k.strip()) == 0:
+                                continue
+                            if "\n" in k:
+                                continue
+                            if "$INSTANCE$" in k:  # fedicrimes
+                                continue
+                            password = zxcvbn(k[:71])
+
+                            if password["crack_times_seconds"]["offline_fast_hashing_1e10_per_second"] < 2630000:
+                                continue
+
+                            keysmashbot_logger.debug("Post %s is gonna get quoted", j["id"])
+
+                            affirming_text = ["is cute", "is a good entity", "is a pretty entity",
+                                "is a good password generator", "is such a good entity", "is such a pretty entity",
+                                "is such a good password generator", ]
+
+                            posts_to_handle.append({"id": j["id"], "text": f"""Password found: `{k}`
+    
+        This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{misskey.get_effective_name(user)} {choice(affirming_text)} :3""", })
+                            break
+                        c.execute(
+                            insert(posts_table).values(id=str(j["id"]), author=misskey.get_effective_name(j["user"]), ))
+                except Exception:
+                    keysmashbot_logger.exception("Failed to query posts for %s", misskey.get_effective_name(user))
+
+        await asyncio.sleep(60)
+
+
+async def reply_to_keysmash_detections(debug=False):
+    global misskey
+
+    while True:
+        notifs = misskey.notifications()
+
+        keysmashbot_logger.debug("Notification count: %s", str(len(notifs)))
+
+        with engine.begin() as c:
+            for i in notifs:
+                try:
+                    if i["note"]["visibility"] != "home" and i["note"]["visibility"] != "public":
+                        keysmashbot_logger.debug("Not reply to post %s: It is private or followers only",
+                            i["note"]["id"], )
                         continue
 
-                    keysmashbot_logger.debug(
-                        "Post %s is gonna get replied to", i["note"]["id"]
-                    )
+                    is_replied = (c.execute(select(responded_dms_table).where(
+                        (responded_dms_table.c.id == str(i["id"])))).fetchone() is not None)
 
-                    affirming_text = [
-                        "is cute",
-                        "is a good entity",
-                        "is a pretty entity",
-                        "is a good password generator",
-                        "is such a good entity",
-                        "is such a pretty entity",
-                        "is such a good password generator",
-                    ]
+                    if is_replied:
+                        keysmashbot_logger.debug("Not replying to post %s: It is already replied to", i["note"]["id"], )
+                        continue
 
-                    if debug:
-                        keysmashbot_logger.debug("Reply to %s", i["note"]["id"])
-                        keysmashbot_logger.debug(f"""Password found: `{j}`
+                    text = i["note"]["text"]
 
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(i["user"])} {choice(affirming_text)} :3""")
+                    text = sanitize_password(text)
+
+                    for j in re.split(r",|\.|\s|;|:|_|-|/", text):
+                        if len(j.strip()) == 0:
+                            continue
+                        if "\n" in j:
+                            continue
+                        if "$INSTANCE$" in j:  # fedicrimes
+                            continue
+                        password = zxcvbn(j[:71])
+
+                        try:
+                            if password["crack_times_seconds"]["offline_fast_hashing_1e10_per_second"] < 2630000:
+                                continue
+                        except Exception:
+                            keysmashbot_logger.exception("Error measuring password length")
+                            continue
+
+                        keysmashbot_logger.debug("Post %s is gonna get replied to", i["note"]["id"])
+
+                        affirming_text = ["is cute", "is a good entity", "is a pretty entity",
+                            "is a good password generator", "is such a good entity", "is such a pretty entity",
+                            "is such a good password generator", ]
+
+                        if debug:
+                            keysmashbot_logger.debug("Reply to %s", i["note"]["id"])
+                            keysmashbot_logger.debug(f"""Password found: `{j}`
+
+    This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{misskey.get_effective_name(i["user"])} {choice(affirming_text)} :3""")
+                        else:
+                            misskey.post(f"""Password found: `{j}`
+
+    This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{misskey.get_effective_name(i["user"]["id"])} {choice(affirming_text)} :3""",
+                                         reply_id=i["note"]["id"])
+
+                        break
                     else:
-                        reply(
-                            instance,
-                            token,
-                            i["note"]["id"],
-                            f"""Password found: `{j}`
+                        keysmashbot_logger.debug("Not replying to %s: This reply doesn't have any keysmashes",
+                            i["note"]["id"], )
 
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{get_effective_name(i["user"])} {choice(affirming_text)} :3""",
-                        )
+                    c.execute(insert(responded_dms_table).values(id=str(i["id"])))
+                except Exception:
+                    keysmashbot_logger.exception("Error responding to DM")
 
-                    break
-                else:
-                    keysmashbot_logger.debug(
-                        "Not replying to %s: This reply doesn't have any keysmashes",
-                        i["note"]["id"],
-                    )
+        await asyncio.sleep(10)
 
-                c.execute(insert(responded_dms_table).values(id=str(i["id"])))
-            except Exception:
-                keysmashbot_logger.exception("Error responding to DM")
+
+async def post_posts_to_handle():
+    global posts_to_handle
+
+    while True:
+        if len(posts_to_handle) > 0:
+            post = posts_to_handle.pop(0)
+
+            misskey.post(post["text"], quote_id=post["id"])
+
+            with engine.begin() as c:
+                c.execute(insert(quoted_posts_table).values(id=str(post["id"])))
+
+        await asyncio.sleep(10)
 
 
 async def main():
@@ -493,74 +397,19 @@ async def main():
         print("Invalid MISSKEY_INSTANCE or MISSKEY_TOKEN")
         exit(1)
 
-    DEBUG = getenv("DEBUG", "0") == "1"
+    global misskey
 
-    if DEBUG:
-        keysmashbot_logger.debug("DEBUG mode active")
+    misskey = Misskey()
+    misskey.log_in(MISSKEY_INSTANCE, MISSKEY_TOKEN)
 
-    me_id = me(MISSKEY_INSTANCE, MISSKEY_TOKEN)
-    me_full = me_detailed(MISSKEY_INSTANCE, MISSKEY_TOKEN)
+    # start tasks
 
-    if not isinstance(me_id, str):
-        print("Invalid token, unable to fetch account")
-        exit(1)
+    tasks = [asyncio.create_task(check_followers()), asyncio.create_task(get_posts_to_quote()),
+        asyncio.create_task(reply_to_keysmash_detections()), asyncio.create_task(post_posts_to_handle())]
 
-    keysmashbot_logger.info("Starting keysmashbot 2.0")
-    while True:
-        keysmashbot_logger.debug("Getting followers and following back...")
-        # followers = await check_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id)
-        followers = []
-        for i in get_followers(MISSKEY_INSTANCE, MISSKEY_TOKEN, me_id):
-            followers.append(i)
+    print("Starting tasks")
 
-        keysmashbot_logger.debug("%s followers", str(len(followers)))
-
-        posts = []
-        for i in followers:
-            keysmashbot_logger.debug("Getting new posts for %s", get_effective_name(i))
-            try:
-                posts.extend(
-                    await get_posts_to_quote(MISSKEY_INSTANCE, MISSKEY_TOKEN, i)
-                )
-            except Exception:
-                keysmashbot_logger.exception(
-                    "Failed to fetch posts to quote for %s", get_effective_name(i)
-                )
-            await asyncio.sleep(0.5)
-
-        shuffle(posts)
-        for i in posts:
-            with engine.begin() as c:
-                a = c.execute(
-                    select(quoted_posts_table.c.id).where(
-                        quoted_posts_table.c.id == str(i["id"])
-                    )
-                )
-                if a.fetchone() is not None:
-                    keysmashbot_logger.debug(
-                        "The post %s is already quoted, skipping", i["id"]
-                    )
-                    continue
-
-            if DEBUG:
-                keysmashbot_logger.debug("Quoting post %s", i["id"])
-                with open("keysmashes.txt", "a") as f:
-                    f.write(i["text"] + "\n\n")
-            else:
-                try:
-                    quote(MISSKEY_INSTANCE, MISSKEY_TOKEN, i["id"], i["text"])
-                    with engine.begin() as c:
-                        c.execute(insert(quoted_posts_table).values(id=str(i["id"])))
-
-                except Exception:
-                    keysmashbot_logger.exception("Error occured quoting %s", i["id"])
-
-                await asyncio.sleep(30)
-
-        await reply_to_keysmash_detections(
-            MISSKEY_INSTANCE, MISSKEY_TOKEN, me_full, debug=DEBUG
-        )
-        await asyncio.sleep(300)
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
