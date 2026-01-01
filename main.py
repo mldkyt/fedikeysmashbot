@@ -435,6 +435,8 @@ async def reply_handle_dms(i: dict, debug: bool = False):
         misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "unlisted", "no")
+    elif command == "meow":
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} meow", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
     else:
         misskey.post("Unrecognized command. Please reply `help` without mentioning anyone else other than the bot to get help.", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
 
