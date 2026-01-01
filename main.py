@@ -177,6 +177,15 @@ async def check_followers() -> list:
 
         for i in misskey.get_followers():
             try:
+                with engine.begin() as c:
+                    a = c.execute(
+                        select(follows_table)
+                        .where(follows_table.c.id == i["id"])
+                    ).fetchone()
+
+                if a is not None:
+                    continue
+
                 if not i["isFollowing"] and not i["hasPendingFollowRequestFromYou"] and not i["isBlocking"]:
                     while True:
                         follow = misskey.follow(i["id"])
@@ -184,7 +193,7 @@ async def check_followers() -> list:
                             with engine.begin() as c:
                                 c.execute(insert(follows_table).values(id=i["id"], acct=misskey.get_effective_name(i)))
                             keysmashbot_logger.info("Followed %s successfully", misskey.get_effective_name(i))
-                            misskey.post("Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", direct_id=i["id"])
+                            misskey.post(f"@{misskey.get_effective_name(i)} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", direct_id=i["id"])
                             break
                         await asyncio.sleep(4)
             except Exception:
@@ -394,7 +403,7 @@ async def reply_handle_dms(i: dict, debug: bool = False):
     command = (" ".join(i["note"]["text"].split(" ")[1:])).strip()
 
     if command == "help":
-        misskey.post("""Available commands:
+        misskey.post(f"""@{misskey.get_effective_name(i["user"])} Available commands:
 - `quote my posts`: Enables keysmashbot to interact with your posts
 - `don't quote my posts`: Disables keysmashbot frm interacting with your posts
 - `include CWd posts`: Include posts with CW's in keysmashing (the quoted posts will have CW)
@@ -403,27 +412,27 @@ async def reply_handle_dms(i: dict, debug: bool = False):
 - `don't include unlisted posts`: Don't include unlisted (home in Misskey, private in Mastodon) posts""", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
 
     elif re.match(r"^(quote|include|use) (my )?posts?$", command):
-        misskey.post("The bot will now take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "consent", "yes")
     elif re.match(r"^don'?t (quotes?|includes?|uses?) (my )?posts?$", command):
-        misskey.post("The bot will no longer take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will no longer take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "consent", "no")
     elif re.match(r"^(includes?|uses?|quotes?) CW'?d? posts?$", command):
-        misskey.post("The bot will now take CW'd posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take CW'd posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "cw", "yes")
     elif re.match(r"^don'?t (includes?|uses?|quotes?) CW'?d? posts?$", command):
-        misskey.post("The bot will now take CW'd posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take CW'd posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "cw", "no")
     elif re.match(r"^(includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        misskey.post("The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "unlisted", "yes")
     elif re.match(r"^don'?t (includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        misskey.post("The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "unlisted", "no")
     else:
