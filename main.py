@@ -225,8 +225,8 @@ async def get_posts_to_quote():
     global posts_to_handle, misskey
 
     while True:
-        with engine.begin() as c:
-            for user in misskey.get_followers():
+        for user in misskey.get_followers():
+            with engine.begin() as c:
                 try:
                     if get_user_pref(c, user["id"], "consent", "no") == "no":
                         keysmashbot_logger.debug("Skipping user %s: No consent", user["id"])
@@ -310,7 +310,7 @@ async def get_posts_to_quote():
                                 "id": j["id"],
                                 "text": f"""Password found: `{k}`
     
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{misskey.get_effective_name(user)} {choice(affirming_text)} :3"""
+    This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{misskey.get_effective_name(user)} {choice(affirming_text)} :3"""
                             }
 
                             if j["cw"] is not None and len(j["cw"].strip()) > 0:
@@ -400,7 +400,7 @@ async def reply_handle_dms(i: dict, debug: bool = False):
 - `include CWd posts`: Include posts with CW's in keysmashing (the quoted posts will have CW)
 - `don't include CWd posts`: Don't include posts with CW's in keysmashing
 - `include unlisted posts`: Include unlisted (home in Misskey, private in Mastodon) posts
-- `don't include unlisted posts`: Don't include unlisted (home in Misskey, private in Mastodon) posts""")
+- `don't include unlisted posts`: Don't include unlisted (home in Misskey, private in Mastodon) posts""", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
 
     elif re.match(r"^(quote|include|use) (my )?posts?$", command):
         misskey.post("The bot will now take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
