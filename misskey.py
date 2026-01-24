@@ -148,7 +148,7 @@ def get_relationships(instance: str, token: str, user_id: str):
     if not req.ok:
         return None
 
-    return req.json()[0]
+    return req.json()
 
 
 def follow(instance: str, token: str, user_id: str):
