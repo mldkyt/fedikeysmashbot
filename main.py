@@ -191,7 +191,11 @@ async def check_followers() -> list:
                         follow = misskey.follow(i["id"])
                         if follow:
                             with engine.begin() as c:
-                                c.execute(insert(follows_table).values(id=i["id"], acct=misskey.get_effective_name(i)))
+                                c.execute(insert(follows_table).values(
+                                    id=i["id"],
+                                    acct=misskey.get_effective_name(i),
+                                    followed=datetime.datetime.now())
+                                )
                             keysmashbot_logger.info("Followed %s successfully", misskey.get_effective_name(i))
                             misskey.post(f"@{misskey.get_effective_name(i)} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", direct_id=i["id"])
                             break
@@ -268,6 +272,14 @@ async def get_posts_to_quote():
                             else:
                                 keysmashbot_logger.debug("Got to end of notes for %s, skipping",
                                     misskey.get_effective_name(user), )
+                                break
+
+                        # History check
+                        b = c.execute(select(follows_table.c.followed).where(follows_table.c.id == str(user["id"]))).fetchone()
+                        if b is not None:
+                            history = get_user_pref(c, user["id"], "history", "no")
+                            if history != "yes" and datetime.datetime.fromisoformat(j["createdAt"]) < b[0]:
+                                keysmashbot_logger.debug("Breaking: Before follow date")
                                 break
 
                         # Visibility check
@@ -408,10 +420,12 @@ async def reply_handle_dms(i: dict, debug: bool = False):
 - `don't quote my posts`: Disables keysmashbot frm interacting with your posts
 - `include CWd posts`: Include posts with CW's in keysmashing (the quoted posts will have CW)
 - `don't include CWd posts`: Don't include posts with CW's in keysmashing
-- `include unlisted posts`: Include unlisted (home in Misskey, private in Mastodon) posts
-- `don't include unlisted posts`: Don't include unlisted (home in Misskey, private in Mastodon) posts""", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+- `include unlisted posts`: Include unlisted posts
+- `don't include unlisted posts`: Don't include unlisted posts
+- `include post history`: Post all posts in history
+- `don't include post history`: Don't include posts in history (note this won't undo posts)""", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
 
-    elif re.match(r"^(quote|include|use) (my )?posts?$", command):
+    elif re.match(r"^(quotes?|includes?|uses?) (my )?posts?$", command):
         misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take your posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "consent", "yes")
@@ -428,13 +442,21 @@ async def reply_handle_dms(i: dict, debug: bool = False):
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "cw", "no")
     elif re.match(r"^(includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take unlisted (home in Misskey, private in Mastodon) posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now take unlisted posts and include them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "unlisted", "yes")
     elif re.match(r"^don'?t (includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will stop taking unlisted (home in Misskey, private in Mastodon) posts and including them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will stop taking unlisted posts and including them", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
         with engine.begin() as c:
             set_user_pref(c, i["user"]["id"], "unlisted", "no")
+    elif re.match(r"^(includes?|uses?|quotes?) posts? history$", command):
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will now quote all your posts it can see on its instance", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        with engine.begin() as c:
+            set_user_pref(c, i["user"]["id"], "history", "yes")
+    elif re.match(r"^don'?t (includes?|uses?|quotes?) posts? history$", command):
+        misskey.post(f"@{misskey.get_effective_name(i['user'])} The bot will not quote any posts that are found on the instance", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
+        with engine.begin() as c:
+            set_user_pref(c, i["user"]["id"], "history", "no")
     elif command == "meow":
         misskey.post(f"@{misskey.get_effective_name(i['user'])} meow", direct_id=i["user"]["id"], reply_id=i["note"]["id"])
     else:

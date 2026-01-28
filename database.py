@@ -8,12 +8,12 @@ from sqlalchemy import (
     DateTime,
     MetaData,
     Table,
-    create_engine,
+    create_engine, func,
 )
 
 dotenv.load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///data/keysmash.db"
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///data/keysmash2.db"
 DATABASE_CONNECT_ARGS = os.getenv("DATABASE_CONNECT_ARGS") or '{"timeout": 30}'
 
 engine = create_engine(DATABASE_URL, connect_args=json.loads(DATABASE_CONNECT_ARGS))
@@ -42,6 +42,7 @@ follows_table = Table(
     md_obj,
     Column("id", VARCHAR, primary_key=True),
     Column("acct", VARCHAR, nullable=False),
+    Column("followed", DateTime, nullable=True, server_default="2026-01-28T00:00:00.000Z")
 )
 
 last_scan_table = Table(
@@ -58,5 +59,3 @@ user_prefs_table = Table(
     Column("key", VARCHAR, primary_key=True),
     Column("value", VARCHAR, nullable=False),
 )
-
-md_obj.create_all(engine, checkfirst=True)
