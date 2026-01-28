@@ -2,7 +2,7 @@ import os
 from logging.config import fileConfig
 
 from dotenv import load_dotenv
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -64,10 +64,8 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+    connectable = create_engine(
+        os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
     )
 
     with connectable.connect() as connection:
