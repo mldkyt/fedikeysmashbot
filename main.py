@@ -278,7 +278,9 @@ async def get_posts_to_quote():
                         b = c.execute(select(follows_table.c.followed).where(follows_table.c.id == str(user["id"]))).fetchone()
                         if b is not None:
                             history = get_user_pref(c, user["id"], "history", "no")
-                            if history != "yes" and datetime.datetime.fromisoformat(j["createdAt"]) < b[0]:
+                            if history != "yes" and \
+                                datetime.datetime.fromisoformat(j["createdAt"]).replace(tzinfo=None) < \
+                                    b[0].replace(tzinfo=None):
                                 keysmashbot_logger.debug("Breaking: Before follow date")
                                 break
 
