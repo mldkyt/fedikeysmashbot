@@ -4,6 +4,7 @@ import re
 from os import getenv
 from random import choice
 
+from aiohttp import ClientSession
 from dotenv import load_dotenv
 from sqlalchemy import delete, insert, select, update
 from zxcvbn import zxcvbn
@@ -512,6 +513,19 @@ async def post_posts_to_handle():
         await asyncio.sleep(10)
 
 
+async def status():
+    HEARTBEAT_URL = getenv("HEARTBEAT_URL", "")
+
+    if len(HEARTBEAT_URL.strip()) == 0:
+        return
+
+    while True:
+        async with ClientSession() as session:
+            async with session.post(HEARTBEAT_URL, timeout=5):
+                pass
+
+        await asyncio.sleep(60)
+
 async def main():
     print("Hello from fedikeysmashbot!")
 
@@ -532,7 +546,8 @@ async def main():
     # start tasks
 
     tasks = [asyncio.create_task(check_followers()), asyncio.create_task(get_posts_to_quote()),
-        asyncio.create_task(reply_to_keysmash_detections()), asyncio.create_task(post_posts_to_handle())]
+        asyncio.create_task(reply_to_keysmash_detections()), asyncio.create_task(post_posts_to_handle()),
+             asyncio.create_task(status())]
 
     print("Starting tasks")
 
