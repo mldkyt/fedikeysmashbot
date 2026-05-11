@@ -8,7 +8,6 @@ from random import choice
 import bs4
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
 from sqlalchemy import delete, insert, select, update
@@ -200,24 +199,25 @@ async def check_followers() -> list:
         keysmashbot_logger.debug("Handling follows")
 
         for i in mastodon.account_followers(mastodon.me()):
+            print(i.acct)
             try:
                 rel = mastodon.account_relationships(i)
                 with engine.begin() as c:
                     a = c.execute(
                         select(follows_table)
-                        .where(follows_table.c.id == i["id"])
+                        .where(follows_table.c.id == i.id)
                     ).fetchone()
 
                 if a is not None:
                     continue
 
-                if not rel[0].following and not rel[0].requested and not rel[0].blocked_by:
+                if len(rel) > 0 and not rel[0].following and not rel[0].requested and not rel[0].blocked_by:
                     while True:
-                        follow = mastodon.account_follow(i["id"])
+                        follow = mastodon.account_follow(i.id)
                         if follow:
                             with engine.begin() as c:
                                 c.execute(insert(follows_table).values(
-                                    id=i["id"],
+                                    id=i.id,
                                     acct=i.acct,
                                     followed=datetime.datetime.now())
                                 )
@@ -242,18 +242,18 @@ async def check_followers() -> list:
                 try:
                     unfollow_ok = mastodon.account_unfollow(i[0])
                     if unfollow_ok:
-                        keysmashbot_logger.info("unfollowed %s", i[0])
+                        keysmashbot_logger.info("unfollowed %s", i[1])
 
                         with engine.begin() as c:
                             c.execute(delete(posts_table).where((posts_table.c.author == i[1])))
                             c.execute(delete(follows_table).where((follows_table.c.id == i[0])))
 
-                            keysmashbot_logger.info("Deleted all posts of %s", i[0])
+                            keysmashbot_logger.info("Deleted all posts of %s", i[1])
 
                     await asyncio.sleep(1)
                 except Exception as e:
                     print(f"failed to unfollow {i[0]}: {str(e)}")
-                    keysmashbot_logger.exception("failed to unfollow %s", i[0])
+                    keysmashbot_logger.exception("failed to unfollow %s", i[1])
                     pass
 
         await asyncio.sleep(180)
