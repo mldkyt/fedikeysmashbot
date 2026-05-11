@@ -289,6 +289,10 @@ async def get_posts_to_quote():
 
                     # Start fetching notes
                     for j in mastodon.account_statuses(user):
+                        if j.account.acct == acct:
+                            # what?
+                            continue
+
                         # Skip if we hit enough notes and no full scan is being performed
                         a = c.execute(select(posts_table.c.id).where((posts_table.c.id == str(j.id)))).fetchone()
                         if a is not None:
@@ -376,6 +380,9 @@ async def get_posts_to_quote():
 async def reply_handle_keysmashes(i: Notification | typing.Any, debug: bool = False):
     if i.status is None:
         return
+    if i.status.account.acct == acct:
+        # this might make sense.
+        return
 
     # Check reply visibility
     if i.status.visibility != "unlisted" and i.status.visibility != "public":
@@ -431,6 +438,9 @@ This password would take {password["crack_times_display"]["offline_fast_hashing_
 async def reply_handle_dms(i: Notification, debug: bool = False):
     # Check reply visibility
     if i.status is None:
+        return
+    if i.status.account.acct == acct:
+        # this might make sense.
         return
 
     if i.status.visibility != "direct":
