@@ -8,6 +8,7 @@ from random import choice
 import bs4
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
 from sqlalchemy import delete, insert, select, update
@@ -580,4 +581,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    load_dotenv()
     asyncio.run(main())
