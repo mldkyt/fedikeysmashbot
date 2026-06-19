@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
 from sqlalchemy import delete, insert, select, update
+from sqlalchemy.orm.attributes import get_history
 from zxcvbn import zxcvbn
 
 from database import (engine, follows_table, last_scan_table, posts_table, quoted_posts_table, responded_dms_table, )
@@ -439,7 +440,11 @@ This password would take {password["crack_times_display"]["offline_fast_hashing_
 
 async def reply_handle_dms(i: Notification, debug: bool = False):
     # Check reply visibility
+    if i.type != "mention":
+        return
     if i.status is None:
+        return
+    if i.status.visibility != "direct":
         return
     if i.status.account.acct == acct:
         # this might make sense.
@@ -457,10 +462,17 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
         print("skipping: not mentioning me")
         return
 
-    command = (" ".join(text.split(" ")[1:])).strip()
+    output = ""
 
-    if command == "help":
-        mastodon.status_post(f"""@{i.status.account.acct} Available commands:
+    for command in text.splitlines():
+        command = " ".join([i for i in command.split(" ") if len(i.strip()) > 0])
+        if command.startswith(f"@{acct}"):
+            command = " ".join(command.split(" ")[1:])
+
+        command = command.strip()
+
+        if command == "help":
+            output += f""" Available commands:
 - `quote my posts`: Enables keysmashbot to interact with your posts
 - `don't quote my posts`: Disables keysmashbot frm interacting with your posts
 - `include CWd posts`: Include posts with CW's in keysmashing (the quoted posts will have CW)
@@ -468,44 +480,61 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
 - `include unlisted posts`: Include unlisted posts
 - `don't include unlisted posts`: Don't include unlisted posts
 - `include post history`: Post all posts in history
-- `don't include post history`: Don't include posts in history (note this won't undo posts)""", in_reply_to_id=i.status.id, visibility="direct")
+- `don't include post history`: Don't include posts in history (note this won't undo posts)
+- `show settings`: Show the current settings the user has set.\n\n"""
 
-    elif re.match(r"^(quotes?|includes?|uses?) (my )?posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will now take your posts and include them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "consent", "yes")
-    elif re.match(r"^don'?t (quotes?|includes?|uses?) (my )?posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will no longer take your posts and include them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "consent", "no")
-    elif re.match(r"^(includes?|uses?|quotes?) CW'?d? posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will now take CW'd posts and include them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "cw", "yes")
-    elif re.match(r"^don'?t (includes?|uses?|quotes?) CW'?d? posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will stop taking CW'd posts and including them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "cw", "no")
-    elif re.match(r"^(includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will now take unlisted posts and include them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "unlisted", "yes")
-    elif re.match(r"^don'?t (includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will stop taking unlisted posts and including them", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "unlisted", "no")
-    elif re.match(r"^(includes?|uses?|quotes?) posts? history$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will now quote all your posts it can see on its instance", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "history", "yes")
-    elif re.match(r"^don'?t (includes?|uses?|quotes?) posts? history$", command):
-        mastodon.status_post(f"@{i.status.account.acct} The bot will not quote any posts that are found on the instance", in_reply_to_id=i.status.id, visibility="direct")
-        with engine.begin() as c:
-            set_user_pref(c, i.status.account.acct, "history", "no")
-    elif command == "meow":
-        mastodon.status_post(f"@{i.status.account.acct} meow", in_reply_to_id=i.status.id)
+        elif re.match(r"^(quotes?|includes?|uses?) (my )?posts?$", command):
+            output += f"The bot will now take your posts and include them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "consent", "yes")
+        elif re.match(r"^don'?t (quotes?|includes?|uses?) (my )?posts?$", command):
+            output += f"The bot will no longer take your posts and include them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "consent", "no")
+        elif re.match(r"^(includes?|uses?|quotes?) CW'?d? posts?$", command):
+            output += f"The bot will now take CW'd posts and include them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "cw", "yes")
+        elif re.match(r"^don'?t (includes?|uses?|quotes?) CW'?d? posts?$", command):
+            output += f"The bot will stop taking CW'd posts and including them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "cw", "no")
+        elif re.match(r"^(includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
+            output += f"The bot will now take unlisted posts and include them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "unlisted", "yes")
+        elif re.match(r"^don'?t (includes?|uses?|quotes?) (unlisted|private|home) posts?$", command):
+            output += f"The bot will stop taking unlisted posts and including them\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "unlisted", "no")
+        elif re.match(r"^(includes?|uses?|quotes?) posts? history$", command):
+            output += f"The bot will now quote all your posts it can see on its instance\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "history", "yes")
+        elif re.match(r"^don'?t (includes?|uses?|quotes?) posts? history$", command):
+            output += f"The bot will not quote any posts that are found on the instance\n\n"
+            with engine.begin() as c:
+                set_user_pref(c, i.status.account.acct, "history", "no")
+        elif re.match(r"^(show|get) settings?$", command):
+            with engine.begin() as c:
+                consent = get_user_pref(c, i.status.account.acct, "consent", "no")
+                history = get_user_pref(c, i.status.account.acct, "history", "no")
+                unlisted = get_user_pref(c, i.status.account.acct, "unlisted", "no")
+                cw = get_user_pref(c, i.status.account.acct, "cw", "no")
+
+            output += f"""Current settings:  
+
+- Consent: {consent}
+- History: {history}
+- Unlisted: {unlisted}
+- CW: {cw}\n\n"""
+        elif command == "meow":
+            output += f"meow"
+
+    if len(output.strip()) > 0:
+        mastodon.status_post(output, visibility="direct", in_reply_to_id=i.status, content_type="text/markdown")
     else:
-        mastodon.status_post("Unrecognized command. Please reply `help` without mentioning anyone else other than the bot to get help.", in_reply_to_id=i.status.id, visibility="direct")
+        mastodon.status_post("Incorrect command(s), use `help` to get help", visibility="direct", in_reply_to_id=i.status, content_type="text/markdown")
 
 
 async def reply_to_keysmash_detections(debug=False):
