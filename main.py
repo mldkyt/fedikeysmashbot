@@ -201,7 +201,6 @@ async def check_followers() -> list:
         keysmashbot_logger.debug("Handling follows")
 
         for i in mastodon.account_followers(mastodon.me()):
-            print(i.acct)
             try:
                 rel = mastodon.account_relationships(i)
                 with engine.begin() as c:
@@ -228,7 +227,6 @@ async def check_followers() -> list:
                             break
                         await asyncio.sleep(4)
             except Exception:
-                print("fail to follow", i.acct)
                 keysmashbot_logger.exception("fail to follow %s", i.acct)
                 break
 
@@ -254,7 +252,6 @@ async def check_followers() -> list:
 
                     await asyncio.sleep(1)
                 except Exception as e:
-                    print(f"failed to unfollow {i[0]}: {str(e)}")
                     keysmashbot_logger.exception("failed to unfollow %s", i[1])
                     pass
 
@@ -456,10 +453,8 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
         return
 
     text = get_text(BeautifulSoup(i.status.content)).strip()
-    print(text)
 
     if not text.startswith(f"@{acct}"):
-        print("skipping: not mentioning me")
         return
 
     output = ""
@@ -603,8 +598,6 @@ async def main():
     tasks = [asyncio.create_task(check_followers()), asyncio.create_task(get_posts_to_quote()),
         asyncio.create_task(reply_to_keysmash_detections()), asyncio.create_task(post_posts_to_handle()),
              asyncio.create_task(status())]
-
-    print("Starting tasks")
 
     await asyncio.gather(*tasks)
 
