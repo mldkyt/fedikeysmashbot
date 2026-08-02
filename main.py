@@ -6,6 +6,7 @@ from os import getenv
 from random import choice
 
 import bs4
+import sentry_sdk
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -213,20 +214,20 @@ async def check_followers() -> list:
                     continue
 
                 if len(rel) > 0 and not rel[0].following and not rel[0].requested and not rel[0].blocked_by:
-                    while True:
-                        follow = mastodon.account_follow(i.id)
-                        if follow:
-                            with engine.begin() as c:
-                                c.execute(insert(follows_table).values(
-                                    id=i.id,
-                                    acct=i.acct,
-                                    followed=datetime.datetime.now())
-                                )
-                            keysmashbot_logger.info("Followed %s successfully", i.acct)
-                            mastodon.status_post(f"@{i.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
-                            break
-                        await asyncio.sleep(4)
-            except Exception:
+                    follow = mastodon.account_follow(i.id)
+                    if follow:
+                        with engine.begin() as c:
+                            c.execute(insert(follows_table).values(
+                                id=i.id,
+                                acct=i.acct,
+                                followed=datetime.datetime.now())
+                            )
+                        keysmashbot_logger.info("Followed %s successfully", i.acct)
+                        mastodon.status_post(f"@{i.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
+
+                    await asyncio.sleep(4)
+            except Exception as e:
+                sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("fail to follow %s", i.acct)
                 break
 
@@ -252,6 +253,7 @@ async def check_followers() -> list:
 
                     await asyncio.sleep(1)
                 except Exception as e:
+                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception("failed to unfollow %s", i[1])
                     pass
 
@@ -370,7 +372,8 @@ async def get_posts_to_quote():
                             break
                         c.execute(
                             insert(posts_table).values(id=str(j.id), author=j.account.acct))
-                except Exception:
+                except Exception as e:
+                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception("Failed to query posts for %s", j.account.acct)
 
         await asyncio.sleep(60)
@@ -550,13 +553,15 @@ async def reply_to_keysmash_detections(debug=False):
                 # Handle replying to keysmashes (public, unlisted posts)
                 try:
                     await reply_handle_keysmashes(i, debug=debug)
-                except Exception:
+                except Exception as e:
+                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception("Error responding to reply")
 
                 # Handle replying to commands (DM's)
                 try:
                     await reply_handle_dms(i, debug=debug)
-                except Exception:
+                except Exception as e:
+                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception("Error responding to DM")
 
                 c.execute(insert(responded_dms_table).values(id=str(i["id"])))
