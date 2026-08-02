@@ -14,5 +14,6 @@ COPY main.py .
 COPY auth.py .
 COPY database.py .
 COPY logger.py .
+COPY user_prefs.py .
 
 ENTRYPOINT ["uv", "run", "main.py"]
