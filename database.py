@@ -8,7 +8,7 @@ from sqlalchemy import (
     DateTime,
     MetaData,
     Table,
-    create_engine, func,
+    create_engine,
 )
 
 dotenv.load_dotenv()

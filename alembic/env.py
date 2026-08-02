@@ -45,7 +45,7 @@ def run_migrations_offline() -> None:
 
     load_dotenv()
 
-    url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    url = os.getenv("DATABASE_URL", "sqlite:///data/keysmash2.db")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -65,7 +65,7 @@ def run_migrations_online() -> None:
 
     """
     connectable = create_engine(
-        os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+        os.getenv("DATABASE_URL", "sqlite:///data/keysmash2.db")
     )
 
     with connectable.connect() as connection:
