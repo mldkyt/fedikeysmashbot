@@ -215,15 +215,14 @@ async def check_followers() -> list:
 
                 if len(rel) > 0 and not rel[0].following and not rel[0].requested and not rel[0].blocked_by:
                     follow = mastodon.account_follow(i.id)
-                    if follow:
-                        with engine.begin() as c:
-                            c.execute(insert(follows_table).values(
-                                id=i.id,
-                                acct=i.acct,
-                                followed=datetime.datetime.now())
-                            )
-                        keysmashbot_logger.info("Followed %s successfully", i.acct)
-                        mastodon.status_post(f"@{i.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
+                    with engine.begin() as c:
+                        c.execute(insert(follows_table).values(
+                            id=i.id,
+                            acct=i.acct,
+                            followed=datetime.datetime.now())
+                        )
+                    keysmashbot_logger.info("Followed %s successfully", i.acct)
+                    mastodon.status_post(f"@{i.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
 
                     await asyncio.sleep(4)
             except Exception as e:
