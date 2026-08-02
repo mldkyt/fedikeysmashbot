@@ -10,6 +10,8 @@ COPY uv.lock .
 
 RUN uv sync
 
+COPY alembic/ alembic/.
+COPY alembic.ini .
 COPY docker-entrypoint.sh .
 COPY main.py .
 COPY auth.py .
