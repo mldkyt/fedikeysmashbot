@@ -21,6 +21,16 @@ from user_prefs import get_user_pref, set_user_pref
 
 keysmashbot_logger = get_logger("keysmashbot")
 
+SENTRY_SDK = getenv("SENTRY_SDK")
+
+if SENTRY_SDK is not None:
+    sentry_sdk.init(
+        dsn=SENTRY_SDK,
+        auto_session_tracking=False,
+        send_default_pii=True,
+        # enable_logs=True,  # Opt-in: send logs to GlitchTip (uses disk space)
+    )
+
 
 # borrowed from https://stackoverflow.com/questions/30337528/make-beautifulsoup-handle-line-breaks-as-a-browser-would
 def get_text(tag: bs4.Tag) -> str:
