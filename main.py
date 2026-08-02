@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
 from sqlalchemy import delete, insert, select, update
-from sqlalchemy.orm.attributes import get_history
 from zxcvbn import zxcvbn
 
 from database import (engine, follows_table, last_scan_table, posts_table, quoted_posts_table, responded_dms_table, )
