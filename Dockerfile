@@ -10,10 +10,11 @@ COPY uv.lock .
 
 RUN uv sync
 
+COPY docker-entrypoint.sh .
 COPY main.py .
 COPY auth.py .
 COPY database.py .
 COPY logger.py .
 COPY user_prefs.py .
 
-ENTRYPOINT ["uv", "run", "main.py"]
+ENTRYPOINT ["bash", "docker-entrypoint.sh"]
