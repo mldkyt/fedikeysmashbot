@@ -3,9 +3,9 @@ import os
 
 from mastodon import Mastodon
 
-app_name = input("app name [collabmarkov]: ")
+app_name = input("app name [keysmash]: ")
 if len(app_name.strip()) == 0:
-    app_name = "collabmarkov"
+    app_name = "keysmash"
 
 instance_url = input("instance url: ")
 

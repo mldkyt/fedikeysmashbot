@@ -453,15 +453,13 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
     if i.status is None:
         return
     if i.status.visibility != "direct":
+        keysmashbot_logger.debug("Not handling reply %s: Not a DM",
+                                 i.status.id)
         return
     if i.status.account.acct == acct:
         # this might make sense.
         return
 
-    if i.status.visibility != "direct":
-        keysmashbot_logger.debug("Not handling reply %s: Not a DM",
-                                 i.status.id)
-        return
 
     text = get_text(BeautifulSoup(i.status.content)).strip()
 
