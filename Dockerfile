@@ -2,7 +2,7 @@ FROM python:3.13-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache postgresql17 postgresql17-dev gcc
+RUN apk add --no-cache postgresql17 postgresql17-dev gcc bash
 RUN pip3 install --upgrade uv
 
 COPY pyproject.toml .
