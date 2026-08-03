@@ -345,7 +345,7 @@ async def get_posts_to_quote():
                             keysmashbot_logger.debug("Post %s is already quoted, skipping", status.id)
                             continue
 
-                        text = get_text(bs4.BeautifulSoup(status.status.content, features="html.parser")).strip()
+                        text = get_text(bs4.BeautifulSoup(status.content, features="html.parser")).strip()
 
                         text = sanitize_password(text)
 
