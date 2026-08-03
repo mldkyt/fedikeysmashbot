@@ -297,13 +297,13 @@ async def get_posts_to_quote():
                             do_full_scan = False
 
                     # Start fetching notes
-                    for j in mastodon.account_statuses(user):
-                        if j.account.acct == acct:
+                    for status in mastodon.account_statuses(user):
+                        if status.account.acct == acct:
                             # what?
                             continue
 
                         # Skip if we hit enough notes and no full scan is being performed
-                        a = c.execute(select(posts_table.c.id).where((posts_table.c.id == str(j.id)))).fetchone()
+                        a = c.execute(select(posts_table.c.id).where((posts_table.c.id == str(status.id)))).fetchone()
                         if a is not None:
                             if do_full_scan:
                                 continue
@@ -317,7 +317,7 @@ async def get_posts_to_quote():
                         if b is not None:
                             history = get_user_pref(c, user.acct, "history", "no")
                             if history != "yes" and \
-                                datetime.datetime.fromisoformat(j["createdAt"]).replace(tzinfo=None) < \
+                                datetime.datetime.fromisoformat(status["createdAt"]).replace(tzinfo=None) < \
                                     b[0].replace(tzinfo=None):
                                 keysmashbot_logger.debug("Breaking: Before follow date")
                                 break
@@ -325,27 +325,27 @@ async def get_posts_to_quote():
                         # Visibility check
                         unlisted_visibility = get_user_pref(c, user.acct, "unlisted", "no") == "yes"
 
-                        if (j.visibility != "unlisted" and not unlisted_visibility) and j["visibility"] != "public":
-                            c.execute(insert(posts_table).values(id=str(j.id),
-                                                                 author=j.account.acct))
-                            keysmashbot_logger.debug("Not handling post %s: It is private or followers only", j.id)
+                        if (status.visibility != "unlisted" and not unlisted_visibility) and status["visibility"] != "public":
+                            c.execute(insert(posts_table).values(id=str(status.id),
+                                                                 author=status.account.acct))
+                            keysmashbot_logger.debug("Not handling post %s: It is private or followers only", status.id)
                             continue
 
                         # CW check
                         cw_posts = get_user_pref(c, user.acct, "cw", "no") == "yes"
-                        if not cw_posts and (j.spoiler_text is not None and len(j.spoiler_text.strip()) > 0):
-                            c.execute(insert(posts_table).values(id=str(j.id),
-                                                                 author=j.account.acct))
-                            keysmashbot_logger.debug("Not handling post %s: It has a CW", j.id)
+                        if not cw_posts and (status.spoiler_text is not None and len(status.spoiler_text.strip()) > 0):
+                            c.execute(insert(posts_table).values(id=str(status.id),
+                                                                 author=status.account.acct))
+                            keysmashbot_logger.debug("Not handling post %s: It has a CW", status.id)
                             continue
 
                         b = c.execute(
-                            select(quoted_posts_table.c.id).where((quoted_posts_table.c.id == str(j.id)))).fetchone()
+                            select(quoted_posts_table.c.id).where((quoted_posts_table.c.id == str(status.id)))).fetchone()
                         if b is not None:
-                            keysmashbot_logger.debug("Post %s is already quoted, skipping", j.id)
+                            keysmashbot_logger.debug("Post %s is already quoted, skipping", status.id)
                             continue
 
-                        text = j["text"]
+                        text = get_text(bs4.BeautifulSoup(status.status.content, features="html.parser")).strip()
 
                         text = sanitize_password(text)
 
@@ -361,28 +361,28 @@ async def get_posts_to_quote():
                             if password["crack_times_seconds"]["offline_fast_hashing_1e10_per_second"] < 2630000:
                                 continue
 
-                            keysmashbot_logger.debug("Post %s is gonna get quoted", j.id)
+                            keysmashbot_logger.debug("Post %s is gonna get quoted", status.id)
 
                             affirming_text = ["is cute", "is a good entity", "is a pretty entity",
                                 "is a good password generator", "is such a good entity", "is such a pretty entity",
                                 "is such a good password generator", ]
 
                             data = {
-                                "id": j.id,
+                                "id": status.id,
                                 "text": f"""Password found: `{k}`
     
     This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{user.acct} {choice(affirming_text)} :3"""
                             }
 
-                            if j.spoiler_text is not None and len(j.spoiler_text.strip()) > 0:
-                                data["cw"] = "cw quote: " + j.spoiler_text
+                            if status.spoiler_text is not None and len(status.spoiler_text.strip()) > 0:
+                                data["cw"] = "cw quote: " + status.spoiler_text
                             posts_to_handle.append(data)
                             break
                         c.execute(
-                            insert(posts_table).values(id=str(j.id), author=j.account.acct))
+                            insert(posts_table).values(id=str(status.id), author=status.account.acct))
                 except Exception as e:
                     sentry_sdk.capture_exception(e)
-                    keysmashbot_logger.exception("Failed to query posts for %s", j.account.acct)
+                    keysmashbot_logger.exception("Failed to query posts for %s", status.account.acct)
 
         await asyncio.sleep(60)
 
