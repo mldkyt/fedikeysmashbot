@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
+from sentry_sdk import capture_exception
 from sqlalchemy import delete, insert, select, update
 from zxcvbn import zxcvbn
 
@@ -210,59 +211,85 @@ async def check_followers() -> list:
     while True:
         keysmashbot_logger.debug("Handling follows")
 
-        for i in mastodon.account_followers(mastodon.me()):
+        for account in mastodon.account_followers(mastodon.me()):
             try:
-                rel = mastodon.account_relationships(i)
+                rel = mastodon.account_relationships(account)
                 with engine.begin() as c:
                     a = c.execute(
                         select(follows_table)
-                        .where(follows_table.c.id == i.id)
+                        .where(follows_table.c.id == account.id)
                     ).fetchone()
 
                 if a is not None:
                     continue
 
+                # Account Move
+                if account.moved is not None:
+                    try:
+                        new_account = account.moved
+                        while True:
+                            if new_account.moved is None:
+                                break
+
+                            new_account = new_account.moved
+
+                        print("Account migrated", account.acct, "to", new_account.acct)
+                        mastodon.account_remove_from_followers(account)
+
+                        if c.execute(
+                                select(follows_table)
+                                        .where(follows_table.c.acct == new_account.acct)
+                        ).fetchone() is None:
+                            print("New account is not following keysmashbot, begging for follow")
+                            mastodon.status_post(
+                                f"Hi @{new_account.acct}! It looks like you moved from {account.acct}. In order for this bot to interact with you, you have to consent by following this bot on your new account.",
+                                visibility="private")
+                    except Exception as e:
+                        capture_exception(e)
+
+                    continue
+
                 if len(rel) > 0 and not rel[0].following and not rel[0].requested and not rel[0].blocked_by:
-                    follow = mastodon.account_follow(i.id)
+                    mastodon.account_follow(account.id)
                     with engine.begin() as c:
                         c.execute(insert(follows_table).values(
-                            id=i.id,
-                            acct=i.acct,
+                            id=account.id,
+                            acct=account.acct,
                             followed=datetime.datetime.now())
                         )
-                    keysmashbot_logger.info("Followed %s successfully", i.acct)
-                    mastodon.status_post(f"@{i.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
+                    keysmashbot_logger.info("Followed %s successfully", account.acct)
+                    mastodon.status_post(f"@{account.acct} Hi! The keysmash bot will not quote any of your posts by default. If you want to opt-in, reply \"quote my posts\".", visibility="direct")
 
                     await asyncio.sleep(4)
             except Exception as e:
                 sentry_sdk.capture_exception(e)
-                keysmashbot_logger.exception("fail to follow %s", i.acct)
+                keysmashbot_logger.exception("fail to follow %s", account.acct)
                 break
 
         with engine.begin() as c:
             a = c.execute(select(follows_table.c.id, follows_table.c.acct)).all()
 
-        for i in a:
-            rel = mastodon.account_relationships(i[0])
+        for account in a:
+            rel = mastodon.account_relationships(account[0])
             if len(rel) == 0:
                 continue
 
             if not rel[0].followed_by and rel[0].following:
                 try:
-                    unfollow_ok = mastodon.account_unfollow(i[0])
+                    unfollow_ok = mastodon.account_unfollow(account[0])
                     if unfollow_ok:
-                        keysmashbot_logger.info("unfollowed %s", i[1])
+                        keysmashbot_logger.info("unfollowed %s", account[1])
 
                         with engine.begin() as c:
-                            c.execute(delete(posts_table).where((posts_table.c.author == i[1])))
-                            c.execute(delete(follows_table).where((follows_table.c.id == i[0])))
+                            c.execute(delete(posts_table).where((posts_table.c.author == account[1])))
+                            c.execute(delete(follows_table).where((follows_table.c.id == account[0])))
 
-                            keysmashbot_logger.info("Deleted all posts of %s", i[1])
+                            keysmashbot_logger.info("Deleted all posts of %s", account[1])
 
                     await asyncio.sleep(1)
                 except Exception as e:
                     sentry_sdk.capture_exception(e)
-                    keysmashbot_logger.exception("failed to unfollow %s", i[1])
+                    keysmashbot_logger.exception("failed to unfollow %s", account[1])
                     pass
 
         await asyncio.sleep(180)
