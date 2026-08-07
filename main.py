@@ -397,8 +397,10 @@ async def get_posts_to_quote():
                             data = {
                                 "id": status.id,
                                 "text": f"""Password found: `{k}`
-    
-    This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{user.acct} {choice(affirming_text)} :3"""
+
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{user.acct} {choice(affirming_text)} :3
+
+QT: {status.url}"""
                             }
 
                             if status.spoiler_text is not None and len(status.spoiler_text.strip()) > 0:
@@ -609,7 +611,7 @@ async def post_posts_to_handle():
         if len(posts_to_handle) > 0:
             post = posts_to_handle.pop(0)
 
-            mastodon.status_post(post["text"], spoiler_text=None if "cw" not in post else post["cw"], quote_id=post["id"])
+            mastodon.status_post(post["text"], spoiler_text=None if "cw" not in post else post["cw"])
 
             with engine.begin() as c:
                 c.execute(insert(quoted_posts_table).values(id=str(post["id"])))
