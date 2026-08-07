@@ -19,6 +19,6 @@ COPY database.py .
 COPY logger.py .
 COPY user_prefs.py .
 
-STOPSIGNAL SIGINT
+STOPSIGNAL SIGQUIT
 
 ENTRYPOINT ["bash", "docker-entrypoint.sh"]
