@@ -603,7 +603,9 @@ This password would take {password["crack_times_display"]["offline_fast_hashing_
 
 This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{i.status.account.acct} {choice(affirming_text)} :3""",
                 in_reply_to_id=i.status.id,
-                visibility=i.status.visibility,
+                visibility=i.status.visibility
+                if i.status.visibility != "public"
+                else "unlisted",
                 spoiler_text=i.status.spoiler_text,
             )
             with engine.begin() as c:
@@ -780,7 +782,9 @@ async def post_posts_to_handle():
             post = posts_to_handle.pop(0)
 
             mastodon.status_post(
-                post["text"], spoiler_text=None if "cw" not in post else post["cw"]
+                post["text"],
+                spoiler_text=None if "cw" not in post else post["cw"],
+                visibility="unlisted",
             )
 
             with engine.begin() as c:
