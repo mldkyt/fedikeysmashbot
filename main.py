@@ -740,9 +740,9 @@ async def reply_to_keysmash_detections(debug=False):
     while True:
         notifs = mastodon.notifications()
 
-        with engine.begin() as c:
-            for i in notifs:
-                # Check reply state
+        for i in notifs:
+            # Check reply state
+            with engine.begin() as c:
                 is_replied = (
                     c.execute(
                         select(responded_dms_table).where(
@@ -752,23 +752,24 @@ async def reply_to_keysmash_detections(debug=False):
                     is not None
                 )
 
-                if is_replied:
-                    continue
+            if is_replied:
+                continue
 
-                # Handle replying to keysmashes (public, unlisted posts)
-                try:
-                    await reply_handle_keysmashes(i, debug=debug)
-                except Exception as e:
-                    sentry_sdk.capture_exception(e)
-                    keysmashbot_logger.exception("Error responding to reply")
+            # Handle replying to keysmashes (public, unlisted posts)
+            try:
+                await reply_handle_keysmashes(i, debug=debug)
+            except Exception as e:
+                sentry_sdk.capture_exception(e)
+                keysmashbot_logger.exception("Error responding to reply")
 
-                # Handle replying to commands (DM's)
-                try:
-                    await reply_handle_dms(i, debug=debug)
-                except Exception as e:
-                    sentry_sdk.capture_exception(e)
-                    keysmashbot_logger.exception("Error responding to DM")
+            # Handle replying to commands (DM's)
+            try:
+                await reply_handle_dms(i, debug=debug)
+            except Exception as e:
+                sentry_sdk.capture_exception(e)
+                keysmashbot_logger.exception("Error responding to DM")
 
+            with engine.begin() as c:
                 c.execute(insert(responded_dms_table).values(id=str(i["id"])))
 
         await asyncio.sleep(5)
