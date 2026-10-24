@@ -26,6 +26,8 @@ from database import (
 from logger import get_logger
 from user_prefs import get_user_pref, set_user_pref
 
+load_dotenv()
+
 keysmashbot_logger = get_logger("keysmashbot")
 
 SENTRY_SDK = getenv("SENTRY_SDK")
@@ -67,11 +69,14 @@ def get_text(tag: bs4.Tag) -> str:
     def _get_text(tag: bs4.Tag) -> typing.Generator:
         for child in tag.children:
             if isinstance(child, bs4.Tag):
+                if child.name == "br":
+                    yield "\n"
+                    continue
                 # if the tag is a block type tag then yield new lines before after
                 is_block_element = child.name not in _inline_elements
                 if is_block_element:
                     yield "\n"
-                yield from ["\n"] if child.name == "br" else _get_text(child)
+                yield from _get_text(child)
                 if is_block_element:
                     yield "\n"
             elif isinstance(child, bs4.NavigableString):
@@ -232,17 +237,24 @@ def sanitize_password(password: str) -> str:
 
 
 posts_to_handle = []
-mastodon: Mastodon = Mastodon(access_token="data/pytooter_usercred.secret")
-acct: str = mastodon.me().acct
+mastodon: Mastodon | None = None
+acct: str = ""
+
+
+def init_mastodon() -> None:
+    global mastodon, acct
+    mastodon = Mastodon(access_token="data/pytooter_usercred.secret")
+    acct = mastodon.me().acct
 
 
 async def check_followers() -> list:
     while True:
         keysmashbot_logger.debug("Handling follows")
 
-        for account in mastodon.account_followers(mastodon.me()):
+        for account in mastodon.pagination_iterator(
+            mastodon.account_followers(mastodon.me())
+        ):
             try:
-                rel = mastodon.account_relationships(account)
                 with engine.begin() as c:
                     a = c.execute(
                         select(follows_table).where(follows_table.c.id == account.id)
@@ -250,6 +262,8 @@ async def check_followers() -> list:
 
                 if a is not None:
                     continue
+
+                rel = mastodon.account_relationships(account)
 
                 # Account Move
                 if account.moved is not None:
@@ -264,14 +278,17 @@ async def check_followers() -> list:
                         print("Account migrated", account.acct, "to", new_account.acct)
                         mastodon.account_remove_from_followers(account)
 
-                        if (
-                            c.execute(
-                                select(follows_table).where(
-                                    follows_table.c.acct == new_account.acct
-                                )
-                            ).fetchone()
-                            is None
-                        ):
+                        with engine.begin() as c2:
+                            new_account_followed = (
+                                c2.execute(
+                                    select(follows_table).where(
+                                        follows_table.c.acct == new_account.acct
+                                    )
+                                ).fetchone()
+                                is not None
+                            )
+
+                        if not new_account_followed:
                             print(
                                 "New account is not following keysmashbot, begging for follow"
                             )
@@ -309,7 +326,7 @@ async def check_followers() -> list:
             except Exception as e:
                 sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("fail to follow %s", account.acct)
-                break
+                continue
 
         with engine.begin() as c:
             a = c.execute(select(follows_table.c.id, follows_table.c.acct)).all()
@@ -319,27 +336,30 @@ async def check_followers() -> list:
             if len(rel) == 0:
                 continue
 
-            if not rel[0].followed_by and rel[0].following:
+            if not rel[0].followed_by:
                 try:
-                    unfollow_ok = mastodon.account_unfollow(account[0])
-                    if unfollow_ok:
+                    if rel[0].following:
+                        if not mastodon.account_unfollow(account[0]):
+                            await asyncio.sleep(1)
+                            continue
+
                         keysmashbot_logger.info("unfollowed %s", account[1])
 
-                        with engine.begin() as c:
-                            c.execute(
-                                delete(posts_table).where(
-                                    (posts_table.c.author == account[1])
-                                )
+                    with engine.begin() as c:
+                        c.execute(
+                            delete(posts_table).where(
+                                (posts_table.c.author == account[1])
                             )
-                            c.execute(
-                                delete(follows_table).where(
-                                    (follows_table.c.id == account[0])
-                                )
+                        )
+                        c.execute(
+                            delete(follows_table).where(
+                                (follows_table.c.id == account[0])
                             )
+                        )
 
-                            keysmashbot_logger.info(
-                                "Deleted all posts of %s", account[1]
-                            )
+                        keysmashbot_logger.info(
+                            "Deleted all posts of %s", account[1]
+                        )
 
                     await asyncio.sleep(1)
                 except Exception as e:
@@ -355,7 +375,7 @@ async def get_posts_to_quote():
 
     while True:
         for post in mastodon.pagination_iterator(
-            mastodon.timeline_home()
+            mastodon.timeline_home(limit=40)
         ):
             if post.visibility == 'direct' or post.visibility == 'private':
                 continue
@@ -385,7 +405,7 @@ async def get_posts_to_quote():
                     # History check
                     b = c.execute(
                         select(follows_table.c.followed).where(
-                            follows_table.c.id == str(post.account.acct)
+                            follows_table.c.acct == post.account.acct
                         )
                     ).fetchone()
                     if b is not None:
@@ -399,9 +419,9 @@ async def get_posts_to_quote():
                         get_user_pref(c, post.account.acct, "unlisted", "no") == "yes"
                     )
 
-                    if (
-                        post.visibility != "unlisted" and not unlisted_visibility
-                    ) and post.visibility != "public":
+                    if post.visibility != "public" and not (
+                        post.visibility == "unlisted" and unlisted_visibility
+                    ):
                         c.execute(
                             insert(posts_table).values(
                                 id=str(post.id), author=post.account.acct
@@ -508,6 +528,8 @@ QT: {post.url}""",
 
 
 async def reply_handle_keysmashes(i: Notification | typing.Any, debug: bool = False):
+    if i.type != "mention":
+        return
     if i.status is None:
         return
     if i.status.account.acct == acct:
@@ -520,6 +542,13 @@ async def reply_handle_keysmashes(i: Notification | typing.Any, debug: bool = Fa
             "Not reply to post %s: It is private or followers only", i.status.id
         )
         return
+
+    with engine.begin() as c:
+        if get_user_pref(c, i.status.account.acct, "consent", "no") == "no":
+            keysmashbot_logger.debug(
+                "Not replying to post %s: No consent", i.status.id
+            )
+            return
 
     text = get_text(BeautifulSoup(i.status.content)).strip()
     text = sanitize_password(text)
@@ -700,8 +729,25 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
 async def reply_to_keysmash_detections(debug=False):
     global mastodon
 
+    last_seen_id = None
+
     while True:
         notifs = mastodon.notifications()
+
+        # A single page only holds the newest notifications. If more arrived than
+        # fit on one page since the last check, walk back until we catch up.
+        page = notifs
+        while (
+            last_seen_id is not None
+            and page
+            and min(int(n.id) for n in page) > last_seen_id
+        ):
+            page = mastodon.fetch_next(page)
+            if page is not None:
+                notifs.extend(page)
+
+        if len(notifs) > 0:
+            last_seen_id = int(notifs[0].id)
 
         for i in notifs:
             # Check reply state
@@ -718,10 +764,13 @@ async def reply_to_keysmash_detections(debug=False):
             if is_replied:
                 continue
 
+            handled = True
+
             # Handle replying to keysmashes (public, unlisted posts)
             try:
                 await reply_handle_keysmashes(i, debug=debug)
             except Exception as e:
+                handled = False
                 sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("Error responding to reply")
 
@@ -729,11 +778,14 @@ async def reply_to_keysmash_detections(debug=False):
             try:
                 await reply_handle_dms(i, debug=debug)
             except Exception as e:
+                handled = False
                 sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("Error responding to DM")
 
-            with engine.begin() as c:
-                c.execute(insert(responded_dms_table).values(id=str(i["id"])))
+            # Only mark it handled if nothing failed, so failures are retried.
+            if handled:
+                with engine.begin() as c:
+                    c.execute(insert(responded_dms_table).values(id=str(i["id"])))
 
         await asyncio.sleep(5)
 
@@ -743,16 +795,24 @@ async def post_posts_to_handle():
 
     while True:
         if len(posts_to_handle) > 0:
-            post = posts_to_handle.pop(0)
+            post = posts_to_handle[0]
 
-            mastodon.status_post(
-                post["text"],
-                spoiler_text=None if "cw" not in post else post["cw"],
-                visibility="unlisted",
-            )
+            try:
+                mastodon.status_post(
+                    post["text"],
+                    spoiler_text=None if "cw" not in post else post["cw"],
+                    visibility="unlisted",
+                )
 
-            with engine.begin() as c:
-                c.execute(insert(quoted_posts_table).values(id=str(post["id"])))
+                posts_to_handle.pop(0)
+
+                with engine.begin() as c:
+                    c.execute(insert(quoted_posts_table).values(id=str(post["id"])))
+            except Exception as e:
+                sentry_sdk.capture_exception(e)
+                keysmashbot_logger.exception(
+                    "Failed to quote post %s, will retry", post["id"]
+                )
 
         await asyncio.sleep(10)
 
@@ -771,20 +831,37 @@ async def status():
         await asyncio.sleep(60)
 
 
+async def run_forever(task: typing.Callable[[], typing.Awaitable]):
+    """Restart a background loop if it crashes, so one error can't stop the bot."""
+    while True:
+        try:
+            await task()
+        except Exception as e:
+            sentry_sdk.capture_exception(e)
+            keysmashbot_logger.exception(
+                "Task %s crashed, restarting", getattr(task, "__name__", task)
+            )
+            await asyncio.sleep(5)
+        else:
+            # The task finished on its own (e.g. no HEARTBEAT_URL); don't restart it.
+            return
+
+
 async def main():
     print("Hello from fedikeysmashbot!")
 
+    init_mastodon()
+
     tasks = [
-        asyncio.create_task(check_followers()),
-        asyncio.create_task(get_posts_to_quote()),
-        asyncio.create_task(reply_to_keysmash_detections()),
-        asyncio.create_task(post_posts_to_handle()),
-        asyncio.create_task(status()),
+        asyncio.create_task(run_forever(check_followers)),
+        asyncio.create_task(run_forever(get_posts_to_quote)),
+        asyncio.create_task(run_forever(reply_to_keysmash_detections)),
+        asyncio.create_task(run_forever(post_posts_to_handle)),
+        asyncio.create_task(run_forever(status)),
     ]
 
     await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
-    load_dotenv()
     asyncio.run(main())
