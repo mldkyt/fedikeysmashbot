@@ -629,7 +629,7 @@ async def reply_handle_dms(i: Notification, debug: bool = False):
         # this might make sense.
         return
 
-    text = get_text(BeautifulSoup(i.status.content)).strip()
+    text = get_text(BeautifulSoup(i.status.content, features="html.parser")).strip()
 
     if not text.startswith(f"@{acct}"):
         return
