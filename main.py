@@ -504,9 +504,7 @@ async def get_posts_to_quote():
                             "id": post.id,
                             "text": f"""Password found: `{k}`
 
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{post.account.acct} {choice(affirming_text)} :3
-
-QT: {post.url}""",
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{post.account.acct} {choice(affirming_text)} :3""",
                         }
 
                         if (
@@ -802,6 +800,7 @@ async def post_posts_to_handle():
                     post["text"],
                     spoiler_text=None if "cw" not in post else post["cw"],
                     visibility="unlisted",
+                    quoted_status_id=post["id"],
                 )
 
                 posts_to_handle.pop(0)
