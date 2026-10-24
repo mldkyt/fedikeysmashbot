@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="uv (fedikeysmashbot)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="uv (fedikeysmashbot)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="~/PycharmProjects/fedikeysmashbot/.venv" project-jdk-type="Python SDK" />
 </project>

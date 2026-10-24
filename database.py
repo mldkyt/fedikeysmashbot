@@ -45,13 +45,6 @@ follows_table = Table(
     Column("followed", DateTime, nullable=True, server_default="2026-01-28T00:00:00.000Z")
 )
 
-last_scan_table = Table(
-    "last_scan",
-    md_obj,
-    Column("id", VARCHAR, primary_key=True),
-    Column("last_scan", DateTime, nullable=False),
-)
-
 user_prefs_table = Table(
     "user_prefs",
     md_obj,

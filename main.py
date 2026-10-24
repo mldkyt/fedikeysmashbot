@@ -19,7 +19,6 @@ from zxcvbn import zxcvbn
 from database import (
     engine,
     follows_table,
-    last_scan_table,
     posts_table,
     quoted_posts_table,
     responded_dms_table,
@@ -355,190 +354,154 @@ async def get_posts_to_quote():
     global posts_to_handle, mastodon
 
     while True:
-        for user in mastodon.pagination_iterator(
-            mastodon.account_followers(mastodon.me())
+        for post in mastodon.pagination_iterator(
+            mastodon.timeline_home()
         ):
+            if post.visibility == 'direct' or post.visibility == 'private':
+                continue
+
+            if post.account.acct == acct:
+                continue
+
+            if post.reblog is not None:
+                continue
+
             with engine.begin() as c:
                 try:
-                    if get_user_pref(c, user.acct, "consent", "no") == "no":
+                    # Existing post check
+                    existing = c.execute(
+                        select(posts_table).where(posts_table.c.id == str(post.id))
+                    ).fetchone()
+
+                    if existing is not None:
+                        continue
+
+                    if get_user_pref(c, post.account.acct, "consent", "no") == "no":
                         keysmashbot_logger.debug(
-                            "Skipping user %s: No consent", user.acct
+                            "Skipping user %s: No consent", post.account.acct
                         )
                         continue
 
-                    # Full check date check
-                    a = c.execute(
-                        select(last_scan_table.c.last_scan).where(
-                            (last_scan_table.c.id == user.acct)
+                    # History check
+                    b = c.execute(
+                        select(follows_table.c.followed).where(
+                            follows_table.c.id == str(post.account.acct)
                         )
                     ).fetchone()
-                    if a is None:
-                        c.execute(
-                            insert(last_scan_table).values(
-                                id=user.acct, last_scan=datetime.datetime.now()
-                            )
-                        )
-
-                        do_full_scan = False
-                    else:
-                        if (datetime.datetime.now() - a[0]).total_seconds() > 1209600:
-                            do_full_scan = True
-                            c.execute(
-                                update(last_scan_table)
-                                .where((last_scan_table.c.id == user.acct))
-                                .values(last_scan=datetime.datetime.now())
-                            )
-
-                            keysmashbot_logger.info(
-                                "Full-scan performing on %s", user.acct
-                            )
-                        else:
-                            do_full_scan = False
-
-                    # Start fetching notes
-                    for status in mastodon.account_statuses(user):
-                        if status.account.acct == acct:
-                            # what?
+                    if b is not None:
+                        history = get_user_pref(c, post.account.acct, "history", "no")
+                        if history != "yes" and post.created_at.replace(tzinfo=None) < b[0].replace(tzinfo=None):
+                            keysmashbot_logger.debug("Skipping: Before follow date")
                             continue
 
-                        # Skip if we hit enough notes and no full scan is being performed
-                        a = c.execute(
-                            select(posts_table.c.id).where(
-                                (posts_table.c.id == str(status.id))
-                            )
-                        ).fetchone()
-                        if a is not None:
-                            if do_full_scan:
-                                continue
-                            else:
-                                keysmashbot_logger.debug(
-                                    "Got to end of notes for %s, skipping",
-                                    user.acct,
-                                )
-                                break
+                    # Visibility check
+                    unlisted_visibility = (
+                        get_user_pref(c, post.account.acct, "unlisted", "no") == "yes"
+                    )
 
-                        # History check
-                        b = c.execute(
-                            select(follows_table.c.followed).where(
-                                follows_table.c.id == str(user.acct)
-                            )
-                        ).fetchone()
-                        if b is not None:
-                            history = get_user_pref(c, user.acct, "history", "no")
-                            if history != "yes" and datetime.datetime.fromisoformat(
-                                status["createdAt"]
-                            ).replace(tzinfo=None) < b[0].replace(tzinfo=None):
-                                keysmashbot_logger.debug("Breaking: Before follow date")
-                                break
-
-                        # Visibility check
-                        unlisted_visibility = (
-                            get_user_pref(c, user.acct, "unlisted", "no") == "yes"
-                        )
-
-                        if (
-                            status.visibility != "unlisted" and not unlisted_visibility
-                        ) and status["visibility"] != "public":
-                            c.execute(
-                                insert(posts_table).values(
-                                    id=str(status.id), author=status.account.acct
-                                )
-                            )
-                            keysmashbot_logger.debug(
-                                "Not handling post %s: It is private or followers only",
-                                status.id,
-                            )
-                            continue
-
-                        # CW check
-                        cw_posts = get_user_pref(c, user.acct, "cw", "no") == "yes"
-                        if not cw_posts and (
-                            status.spoiler_text is not None
-                            and len(status.spoiler_text.strip()) > 0
-                        ):
-                            c.execute(
-                                insert(posts_table).values(
-                                    id=str(status.id), author=status.account.acct
-                                )
-                            )
-                            keysmashbot_logger.debug(
-                                "Not handling post %s: It has a CW", status.id
-                            )
-                            continue
-
-                        b = c.execute(
-                            select(quoted_posts_table.c.id).where(
-                                (quoted_posts_table.c.id == str(status.id))
-                            )
-                        ).fetchone()
-                        if b is not None:
-                            keysmashbot_logger.debug(
-                                "Post %s is already quoted, skipping", status.id
-                            )
-                            continue
-
-                        text = get_text(
-                            bs4.BeautifulSoup(status.content, features="html.parser")
-                        ).strip()
-
-                        text = sanitize_password(text)
-
-                        for k in re.split(r"[,.\s;:_\-/]", text):
-                            if len(k.strip()) == 0:
-                                continue
-                            if "\n" in k:
-                                continue
-                            if "$INSTANCE$" in k:  # fedicrimes
-                                continue
-                            password = zxcvbn(k[:71])
-
-                            if (
-                                password["crack_times_seconds"][
-                                    "offline_fast_hashing_1e10_per_second"
-                                ]
-                                < 2630000
-                            ):
-                                continue
-
-                            keysmashbot_logger.debug(
-                                "Post %s is gonna get quoted", status.id
-                            )
-
-                            affirming_text = [
-                                "is cute",
-                                "is a good entity",
-                                "is a pretty entity",
-                                "is a good password generator",
-                                "is such a good entity",
-                                "is such a pretty entity",
-                                "is such a good password generator",
-                            ]
-
-                            data = {
-                                "id": status.id,
-                                "text": f"""Password found: `{k}`
-
-This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{user.acct} {choice(affirming_text)} :3
-
-QT: {status.url}""",
-                            }
-
-                            if (
-                                status.spoiler_text is not None
-                                and len(status.spoiler_text.strip()) > 0
-                            ):
-                                data["cw"] = "cw quote: " + status.spoiler_text
-                            posts_to_handle.append(data)
-                            break
+                    if (
+                        post.visibility != "unlisted" and not unlisted_visibility
+                    ) and post.visibility != "public":
                         c.execute(
                             insert(posts_table).values(
-                                id=str(status.id), author=status.account.acct
+                                id=str(post.id), author=post.account.acct
                             )
                         )
+                        keysmashbot_logger.debug(
+                            "Not handling post %s: It is private or followers only",
+                            post.id,
+                        )
+                        continue
+
+                    # CW check
+                    cw_posts = get_user_pref(c, post.account.acct, "cw", "no") == "yes"
+                    if not cw_posts and (
+                        post.spoiler_text is not None
+                        and len(post.spoiler_text.strip()) > 0
+                    ):
+                        c.execute(
+                            insert(posts_table).values(
+                                id=str(post.id), author=post.account.acct
+                            )
+                        )
+                        keysmashbot_logger.debug(
+                            "Not handling post %s: It has a CW", post.id
+                        )
+                        continue
+
+                    b = c.execute(
+                        select(quoted_posts_table.c.id).where(
+                            (quoted_posts_table.c.id == str(post.id))
+                        )
+                    ).fetchone()
+                    if b is not None:
+                        keysmashbot_logger.debug(
+                            "Post %s is already quoted, skipping", post.id
+                        )
+                        continue
+
+                    text = get_text(
+                        bs4.BeautifulSoup(post.content, features="html.parser")
+                    ).strip()
+
+                    text = sanitize_password(text)
+
+                    for k in re.split(r"[,.\s;:_\-/]", text):
+                        if len(k.strip()) == 0:
+                            continue
+                        if "\n" in k:
+                            continue
+                        if "$INSTANCE$" in k:  # fedicrimes
+                            continue
+                        password = zxcvbn(k[:71])
+
+                        if (
+                            password["crack_times_seconds"][
+                                "offline_fast_hashing_1e10_per_second"
+                            ]
+                            < 2630000
+                        ):
+                            continue
+
+                        keysmashbot_logger.debug(
+                            "Post %s is gonna get quoted", post.id
+                        )
+
+                        affirming_text = [
+                            "is cute",
+                            "is a good entity",
+                            "is a pretty entity",
+                            "is a good password generator",
+                            "is such a good entity",
+                            "is such a pretty entity",
+                            "is such a good password generator",
+                        ]
+
+                        data = {
+                            "id": post.id,
+                            "text": f"""Password found: `{k}`
+
+This password would take {password["crack_times_display"]["offline_fast_hashing_1e10_per_second"]} to crack, @{post.account.acct} {choice(affirming_text)} :3
+
+QT: {post.url}""",
+                        }
+
+                        if (
+                            post.spoiler_text is not None
+                            and len(post.spoiler_text.strip()) > 0
+                        ):
+                            data["cw"] = "cw quote: " + post.spoiler_text
+                        posts_to_handle.append(data)
+                        break
+                    c.execute(
+                        insert(posts_table).values(
+                            id=str(post.id), author=post.account.acct
+                        )
+                    )
                 except Exception as e:
                     sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception(
-                        "Failed to query posts for %s", status.account.acct
+                        "Failed to query posts for %s", post.account.acct
                     )
 
         await asyncio.sleep(60)
