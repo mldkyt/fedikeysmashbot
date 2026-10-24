@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import logging
 import re
 import typing
 from os import getenv
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 from mastodon import Mastodon
 from mastodon.return_types import Notification
 from sentry_sdk import capture_exception
+from sentry_sdk.integrations.logging import LoggingIntegration
 from sqlalchemy import delete, insert, select, update
 from zxcvbn import zxcvbn
 
@@ -37,6 +39,9 @@ if SENTRY_SDK is not None:
         dsn=SENTRY_SDK,
         auto_session_tracking=False,
         send_default_pii=True,
+        integrations=[
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ]
         # enable_logs=True,  # Opt-in: send logs to GlitchTip (uses disk space)
     )
 
@@ -324,7 +329,6 @@ async def check_followers() -> list:
 
                     await asyncio.sleep(4)
             except Exception as e:
-                sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("fail to follow %s", account.acct)
                 continue
 
@@ -363,7 +367,6 @@ async def check_followers() -> list:
 
                     await asyncio.sleep(1)
                 except Exception as e:
-                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception("failed to unfollow %s", account[1])
                     pass
 
@@ -519,7 +522,6 @@ QT: {post.url}""",
                         )
                     )
                 except Exception as e:
-                    sentry_sdk.capture_exception(e)
                     keysmashbot_logger.exception(
                         "Failed to query posts for %s", post.account.acct
                     )
@@ -771,7 +773,6 @@ async def reply_to_keysmash_detections(debug=False):
                 await reply_handle_keysmashes(i, debug=debug)
             except Exception as e:
                 handled = False
-                sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("Error responding to reply")
 
             # Handle replying to commands (DM's)
@@ -779,7 +780,6 @@ async def reply_to_keysmash_detections(debug=False):
                 await reply_handle_dms(i, debug=debug)
             except Exception as e:
                 handled = False
-                sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception("Error responding to DM")
 
             # Only mark it handled if nothing failed, so failures are retried.
@@ -809,7 +809,6 @@ async def post_posts_to_handle():
                 with engine.begin() as c:
                     c.execute(insert(quoted_posts_table).values(id=str(post["id"])))
             except Exception as e:
-                sentry_sdk.capture_exception(e)
                 keysmashbot_logger.exception(
                     "Failed to quote post %s, will retry", post["id"]
                 )
@@ -837,7 +836,6 @@ async def run_forever(task: typing.Callable[[], typing.Awaitable]):
         try:
             await task()
         except Exception as e:
-            sentry_sdk.capture_exception(e)
             keysmashbot_logger.exception(
                 "Task %s crashed, restarting", getattr(task, "__name__", task)
             )
